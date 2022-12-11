@@ -42,11 +42,6 @@ shinyServer(function(input, output, session) {
   # Give recommendations when the submit button is clicked
   df1 <- eventReactive(input$btn1, {
     withBusyIndicatorServer("btn1", { # showing the busy indicator
-      # hide the rating container
-      useShinyjs()
-      jsCode <- "document.querySelector('[data-widget=collapse]').click();"
-      runjs(jsCode)
-      
       # get the user's rating data
       user_predicted_ids = unlist(system1.res[input$slct1])
       user_predicted_idx = match(user_predicted_ids, movies$MovieID)

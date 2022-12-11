@@ -1,0 +1,11 @@
+name: cs542_movierecommender
+title:
+username:
+account: mouhao
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 7869898
+bundleId: 6624405
+url: https://mouhao.shinyapps.io/cs542_movierecommender/
+when: 1670799225.94367
+lastSyncTime: 1670799225.94368

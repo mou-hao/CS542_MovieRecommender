@@ -1,0 +1,143 @@
+---
+title: "Shiny Precomputed Values"
+author: Hao Mou (haomou2)
+date: "Fall 2022"
+output:
+  html_document:
+    toc: yes
+---
+
+In the Shiny App, there are a number of values that can be pre-computed,
+I will detail how these values are computed in this document.
+
+First, let's load the libraries and the data.
+
+```{r, warning=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(recommenderlab)
+library(DT)
+library(data.table)
+library(reshape2)
+
+set.seed(8998)
+```
+
+```{r}
+myurl = "https://liangfgithub.github.io/MovieData/"
+
+# Ratings data
+ratings = read.csv(paste0(myurl, 'ratings.dat?raw=true'), 
+                   sep = ':',
+                   colClasses = c('integer', 'NULL'), 
+                   header = FALSE)
+colnames(ratings) = c('UserID', 'MovieID', 'Rating', 'Timestamp')
+
+# Movies data
+movies = readLines(paste0(myurl, 'movies.dat?raw=true'))
+movies = strsplit(movies, split = "::", fixed = TRUE, useBytes = TRUE)
+movies = matrix(unlist(movies), ncol = 3, byrow = TRUE)
+movies = data.frame(movies, stringsAsFactors = FALSE)
+colnames(movies) = c('MovieID', 'Title', 'Genres')
+
+movies$MovieID = as.integer(movies$MovieID)
+movies$Title = iconv(movies$Title, "latin1", "UTF-8")
+movies$Year = as.numeric(unlist(
+  lapply(movies$Title, function(x) substr(x, nchar(x)-4, nchar(x)-1))))
+
+# User data
+users = read.csv(paste0(myurl, 'users.dat?raw=true'),
+                 sep = ':', header = FALSE)
+users = users[, -c(2,4,6,8)] # skip columns
+colnames(users) = c('UserID', 'Gender', 'Age', 'Occupation', 'Zip-code')
+```
+
+# System I results
+
+Since system I only depends on a single input: the genre, we can pre-compute
+the recommended movies for each genre so that they don't need to be calculated
+at run time.
+I will use popularity as measured by the number of ratings for system I.
+
+```{r}
+# Add genre matrix to movies
+genres = as.data.frame(movies$Genres, stringsAsFactors=FALSE)
+tmp = as.data.frame(tstrsplit(genres[,1], '[|]',
+                              type.convert=TRUE),
+                    stringsAsFactors=FALSE)
+genre_list = c("Action", "Adventure", "Animation", 
+               "Children's", "Comedy", "Crime",
+               "Documentary", "Drama", "Fantasy",
+               "Film-Noir", "Horror", "Musical", 
+               "Mystery", "Romance", "Sci-Fi", 
+               "Thriller", "War", "Western")
+m = length(genre_list)
+genre_matrix = matrix(0, nrow(movies), length(genre_list))
+for(i in 1:nrow(tmp)){
+  genre_matrix[i,genre_list %in% tmp[i,]]=1
+}
+colnames(genre_matrix) = genre_list
+remove("tmp", "genres")
+movies = cbind(movies, genre_matrix)
+
+# Add average ratings and rating counts to movies
+movies = ratings %>%
+  group_by(MovieID) %>% 
+  summarize(ratings_per_movie = n(), ave_ratings = mean(Rating)) %>%
+  inner_join(movies, by = "MovieID")
+```
+
+```{r}
+# The scheme
+top_n_by_popularity = function(genre, n) {
+  movies %>% 
+    filter(movies[genre] == 1) %>%
+    slice_max(ratings_per_movie, n = n, with_ties = FALSE) %>%
+    select(c("MovieID"))
+}
+
+# Precompute
+system1.res = list()
+for(genre in genre_list){
+  system1.res[genre] = top_n_by_popularity(genre, 10)
+}
+
+saveRDS(system1.res, file = "rds/system1.res.RDS")
+```
+
+
+# Most popular movies
+
+The most popular movies will be used in System II to ask users for initial
+ratings.
+
+```{r}
+popular.120 = movies %>%
+  slice_max(ratings_per_movie, n = 120, with_ties = FALSE) %>%
+  select(c("MovieID"))
+
+saveRDS(popular.120, file = "rds/popular.120.RDS")
+```
+
+# System II IBCF model
+
+I will be using IBCF for System II and the IBCF model can be pre-trained.
+
+```{r}
+i = paste0('u', ratings$UserID)
+j = paste0('m', ratings$MovieID)
+x = ratings$Rating
+tmp = data.frame(i, j, x, stringsAsFactors = T)
+Rmat = sparseMatrix(as.integer(tmp$i), as.integer(tmp$j), x = tmp$x)
+rownames(Rmat) = levels(tmp$i)
+colnames(Rmat) = levels(tmp$j)
+Rmat = new('realRatingMatrix', data = Rmat)
+
+recommender.IBCF = Recommender(Rmat, method = "IBCF",
+                               parameter = list(normalize = 'center', 
+                                                method = 'Cosine', 
+                                                k = 30))
+
+saveRDS(recommender.IBCF, file = "rds/recommender.IBCF.RDS")
+```
+
